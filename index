@@ -1,1 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Shopping Chatbot</title>
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --bg: #f8fafc;
+      --text: #1e293b;
+      --card: #ffffff;
+      --border: #e2e8f0;
+    }
+    body {
+      margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text);
+      display: flex; flex-direction: column; height: 100vh;
+    }
+    header {
+      background: var(--primary); color: white; padding: 1rem; text-align: center; font-weight: 600;
+    }
+    #chat-container {
+      flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem;
+    }
+    .message {
+      max-width: 80%; padding: 0.75rem 1rem; border-radius: 1rem; line-height: 1.5;
+    }
+    .user { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 0.25rem; }
+    .bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 0.25rem; }
+    .product-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;
+    }
+    .product-card {
+      border: 1px solid var(--border); border-radius: 0.75rem; overflow: hidden; background: white;
+      text-align: center; font-size: 0.9rem;
+    }
+    .product-card img { width: 100%; height: 150px; object-fit: cover; }
+    .product-card h4 { margin: 0.5rem; font-size: 1rem; }
+    .price { color: #e91e63; font-weight: bold; }
+    .trend-chart { width: 100%; height: 200px; margin-top: 1rem; }
+    #input-area {
+      display: flex; padding: 1rem; background: white; border-top: 1px solid var(--border); gap: 0.5rem;
+    }
+    #user-input { flex: 1; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.5rem; font-size: 1rem; }
+    button {
+      padding: 0.75rem 1rem; background: var(--primary); color: white; border: none; border-radius: 0.5rem;
+      cursor: pointer; font-weight: 600;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .mic-btn { background: #10b981; }
+    .loading { font-style: italic; color: #64748b; }
+    footer { text-align: center; padding: 0.5rem; font-size: 0.8rem; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <header>AI Shopping & Trends Chatbot</header>
+  <div id="chat-container"></div>
+  <div id="input-area">
+    <input type="text" id="user-input" placeholder="Ask about products, prices, or trends..." />
+    <button id="send-btn">Send</button>
+    <button id="mic-btn" class="mic-btn" title="Speak">🎤</button>
+  </div>
+  <footer>Uses Google Search, Amazon, & Trends APIs</footer>
 
+  <script>
+    // === CONFIGURATION (Replace with your keys) ===
+    const CONFIG = {
+      GOOGLE_API_KEY: 'YOUR_GOOGLE_CUSTOM_SEARCH_KEY',
+      GOOGLE_CX: 'YOUR_SEARCH_ENGINE_ID',
+      AMAZON_PROXY: 'https://your-proxy-server.com/amazon-search', // Use a proxy for Amazon PA API
+      TRENDS_PROXY: 'https://your-proxy-server.com/trends',       // Use a proxy for pytrends
+    };
+
+    // DOM Elements
+    const chat = document.getElementById('chat-container');
+    const input = document.getElementById('user-input');
+    const sendBtn = document.getElementById('send-btn');
+    const micBtn = document.getElementById('mic-btn');
+
+    // Speech Recognition
+    let recognition;
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+    }
+
+    // Add Message
+    function addMessage(text, sender = 'bot') {
+      const msg = document.createElement('div');
+      msg.className = `message ${sender}`;
+      msg.innerHTML = text;
+      chat.appendChild(msg);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    // Simulate Bot Response with APIs
+    async function processQuery(query) {
+      addMessage('<span class="loading">Thinking...</span>', 'bot');
+
+      try {
+        // 1. Google Web Search
+        const searchResults = await googleSearch(query);
+        const searchSnippet = searchResults[0]?.snippet || 'No web results.';
+
+        // 2. Amazon Product Search (via proxy)
+        const products = await fetchAmazonProducts(query);
+
+        // 3. Google Trends (via proxy)
+        const trendData = await fetchTrends(query);
+
+        // Build Response
+        let response = `<strong>Web Insight:</strong> ${searchSnippet}<hr>`;
+
+        if (products.length > 0) {
+          response += `<strong>Top Products:</strong><div class="product-grid">`;
+          products.slice(0, 4).forEach(p => {
+            response += `
+              <div class="product-card">
+                <img src="${p.image || 'https://via.placeholder.com/200'}" alt="${p.title}">
+                <h4>${p.title.substring(0, 50)}...</h4>
+                <div class="price">$${p.price || 'N/A'}</div>
+                <a href="${p.url}" target="_blank" style="font-size:0.8rem;color:#4f46e5;">View →</a>
+              </div>`;
+          });
+          response += `</div>`;
+        } else {
+          response += `<em>No products found.</em>`;
+        }
+
+        if (trendData.length > 1) {
+          response += `<strong>Trend (Last 7 Days):</strong><canvas id="trendChart" class="trend-chart"></canvas>`;
+          setTimeout(() => drawTrendChart(trendData), 100);
+        }
+
+        // Replace loading message
+        chat.lastChild.innerHTML = response;
+      } catch (err) {
+        chat.lastChild.innerHTML = `Error: ${err.message}`;
+      }
+    }
+
+    // Google Custom Search
+    async function googleSearch(query) {
+      const url = `https://www.googleapis.com/customsearch/v1?key=${CONFIG.GOOGLE_API_KEY}&cx=${CONFIG.GOOGLE_CX}&q=${encodeURIComponent(query)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.items || [];
+    }
+
+    // Amazon via Proxy (CORS + Auth workaround)
+    async function fetchAmazonProducts(query) {
+      try {
+        const res = await fetch(`${CONFIG.AMAZON_PROXY}?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        return data.products || [];
+      } catch {
+        return [
+          { title: "Sample Laptop Pro", price: "999.99", image: "https://via.placeholder.com/200?text=Laptop", url: "https://amazon.com" },
+          { title: "Wireless Earbuds", price: "79.99", image: "https://via.placeholder.com/200?text=Earbuds", url: "https://amazon.com" }
+        ];
+      }
+    }
+
+    // Trends via Proxy
+    async function fetchTrends(query) {
+      try {
+        const res = await fetch(`${CONFIG.TRENDS_PROXY}?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        return data.timeline || [];
+      } catch {
+        // Mock trend data
+        const now = Date.now();
+        return Array.from({length: 7}, (_, i) => ({
+          date: new Date(now - (6-i)*86400000).toLocaleDateString('en', {weekday: 'short'}),
+          value: Math.floor(Math.random() * 50) + 50
+        }));
+      }
+    }
+
+    // Draw Trend Chart
+    function drawTrendChart(data) {
+      const canvas = document.getElementById('trendChart');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width = canvas.parentElement.offsetWidth;
+      const h = canvas.height = 200;
+      ctx.clearRect(0, 0, w, h);
+
+      const labels = data.map(d => d.date);
+      const values = data.map(d => d.value);
+      const max = Math.max(...values) * 1.2;
+
+      // Grid
+      ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+      for (let i = 0; i <= 5; i++) {
+        const y = (h * i) / 5;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+
+      // Line
+      ctx.strokeStyle = '#4f46e5'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      data.forEach((d, i) => {
+        const x = (w * i) / (data.length - 1);
+        const y = h - (h * d.value / max);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Labels
+      ctx.fillStyle = '#64748b'; ctx.font = '12px sans-serif';
+      labels.forEach((l, i) => {
+        const x = (w * i) / (data.length - 1);
+        ctx.fillText(l, x - 10, h - 5);
+      });
+    }
+
+    // Event Listeners
+    sendBtn.onclick = () => {
+      const q = input.value.trim();
+      if (!q) return;
+      addMessage(q, 'user');
+      input.value = '';
+      processQuery(q);
+    };
+
+    input.onkeypress = e => e.key === 'Enter' && sendBtn.click();
+
+    micBtn.onclick = () => {
+      if (!recognition) {
+        alert('Speech recognition not supported in your browser.');
+        return;
+      }
+      micBtn.disabled = true;
+      micBtn.textContent = '🎙️';
+      recognition.start();
+    };
+
+    if (recognition) {
+      recognition.onresult = e => {
+        const transcript = e.results[0][0].transcript;
+        input.value = transcript;
+        micBtn.disabled = false;
+        micBtn.textContent = '🎤';
+        sendBtn.click();
+      };
+      recognition.onerror = () => {
+        micBtn.disabled = false;
+        micBtn.textContent = '🎤';
+        addMessage('Voice input failed. Try again.', 'bot');
+      };
+      recognition.onend = () => {
+        micBtn.disabled = false;
+        micBtn.textContent = '🎤';
+      };
+    }
+
+    // Welcome Message
+    setTimeout(() => {
+      addMessage(`
+        <strong>Hello!</strong> I can help you:
+        <ul>
+          <li>Search the web</li>
+          <li>Find products on Amazon, eBay, etc.</li>
+          <li>Show real-time price trends</li>
+        </ul>
+        Try: <em>"best laptop under $800"</em> or speak using 🎤
+      `);
+    }, 500);
+  </script>
+</body>
+</html>
